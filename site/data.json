@@ -1,0 +1,1 @@
+{"payload": "A small file that the workers fetch with a synchronous request and put into their in-memory file system."}

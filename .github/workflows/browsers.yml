@@ -1,0 +1,175 @@
+# Builds the page once and opens it in every browser we can reach: current and
+# three-year-old Chrome and Firefox on Linux, WebKit on Linux, Edge and Firefox
+# on Windows, Safari on macOS, and Safari on the iOS simulators of each macOS
+# image. Every browser job writes one result file; the last job puts them into
+# one table on the run's summary page.
+#
+# A browser that cannot run the application is a result, not a failure: a
+# job fails only when the page did not report at all.
+name: browsers
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 3 * * 1'      # Mondays, 03:00 UTC: new browsers, new runner images
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  EMSDK_VERSION: 4.0.9
+  NODE_VERSION: 22
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: ${{ env.EMSDK_VERSION }}
+      - run: make
+      # The page's own modules must need nothing the page does not test.
+      - run: |
+          bin=$(em-config BINARYEN_ROOT)/bin
+          WASM_OPT=$bin/wasm-opt WASM_DIS=$bin/wasm-dis tools/check-features.sh build/site/*.wasm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: build/site
+
+  linux:
+    needs: build
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Chrome, current (Linux)
+            setup: echo "BROWSER=$(command -v google-chrome)" >> "$GITHUB_ENV"
+            cmd: '"$BROWSER" --headless=new --no-sandbox --no-first-run --user-data-dir="$RUNNER_TEMP/profile" "{url}"'
+          - name: Firefox, current (Linux)
+            setup: echo "BROWSER=$(command -v firefox)" >> "$GITHUB_ENV"
+            cmd: '"$BROWSER" --headless --no-remote --profile "$RUNNER_TEMP/profile" "{url}"'
+          # About three years old: November 2023.
+          - name: Chrome 119 (Linux)
+            setup: |
+              npx --yes @puppeteer/browsers@2.6.1 install chrome@119 --path "$RUNNER_TEMP/b" | tee b.txt
+              echo "BROWSER=$(tail -1 b.txt | awk '{print $2}')" >> "$GITHUB_ENV"
+            cmd: '"$BROWSER" --headless=new --no-sandbox --no-first-run --user-data-dir="$RUNNER_TEMP/profile" "{url}"'
+          - name: Firefox 120 (Linux)
+            setup: |
+              curl -sSfL https://archive.mozilla.org/pub/firefox/releases/120.0/linux-x86_64/en-US/firefox-120.0.tar.bz2 | tar -xj -C "$RUNNER_TEMP"
+              echo "BROWSER=$RUNNER_TEMP/firefox/firefox" >> "$GITHUB_ENV"
+            cmd: '"$BROWSER" --headless --no-remote --profile "$RUNNER_TEMP/profile" "{url}"'
+          - name: WebKit, Playwright build (Linux)
+            setup: |
+              npm install --no-save playwright@1.49.1
+              npx playwright install --with-deps webkit
+            cmd: node tools/playwright.mjs webkit "{url}"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: build/site
+      - name: Install ${{ matrix.name }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/profile"
+          ${{ matrix.setup }}
+      - name: Run in ${{ matrix.name }}
+        run: |
+          eval "set -- ${{ matrix.cmd }}"
+          node tools/run.mjs --name "${{ matrix.name }}" --out results/result.json -- "$@"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: result-linux-${{ strategy.job-index }}
+          path: results
+
+  windows:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: build/site
+      - name: Run in Edge
+        shell: bash
+        run: |
+          edge="C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
+          node tools/run.mjs --name "Edge, current (Windows)" --out results/edge.json -- \
+            "$edge" --headless=new --no-first-run --user-data-dir="$RUNNER_TEMP/edge" '{url}'
+      - name: Run in Firefox
+        if: always()
+        shell: bash
+        run: |
+          node tools/run.mjs --name "Firefox, current (Windows)" --out results/firefox.json -- \
+            "C:/Program Files/Mozilla Firefox/firefox.exe" --headless --no-remote \
+            --profile "$RUNNER_TEMP/firefox" '{url}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: result-windows
+          path: results
+
+  macos:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each image brings its own Safari and its own iOS simulator runtimes.
+        os: [macos-15, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: build/site
+      - name: Run in Safari
+        run: |
+          sudo safaridriver --enable
+          version=$(defaults read /Applications/Safari.app/Contents/Info CFBundleShortVersionString)
+          node tools/run.mjs --name "Safari $version, macOS $(sw_vers -productVersion)" \
+            --out results/safari.json -- node tools/safari.mjs '{url}'
+      - name: Run in Safari on iOS simulators
+        if: always()
+        run: tools/ios.sh results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: result-${{ matrix.os }}
+          path: results
+
+  summary:
+    needs: [linux, windows, macos]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: result-*
+          path: results
+      - run: node tools/summarize.mjs results | tee -a "$GITHUB_STEP_SUMMARY" > summary.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: summary
+          path: |
+            summary.md
+            results

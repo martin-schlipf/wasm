@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebAssembly Browser Check</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --fg: #1d1d1b; --muted: #6b6b66; --line: #e2e1dc; --card: #ffffff;
+    --pass: #1f7a3a; --fail: #b3261e; --warn: #9a6400; --info: #3d5a99;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161615; --fg: #ecebe6; --muted: #a09f99; --line: #33322f; --card: #1f1f1d;
+      --pass: #6fcf8a; --fail: #f2867d; --warn: #e6b450; --info: #8fb0f0;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161615; --fg: #ecebe6; --muted: #a09f99; --line: #33322f; --card: #1f1f1d;
+    --pass: #6fcf8a; --fail: #f2867d; --warn: #e6b450; --info: #8fb0f0;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.lead { color: var(--muted); margin: 0 0 20px; }
+  #verdict { background: var(--card); border: 1px solid var(--line); border-left: 6px solid var(--muted);
+             border-radius: 8px; padding: 14px 16px; margin-bottom: 20px; }
+  #verdict.pass { border-left-color: var(--pass); }
+  #verdict.warn { border-left-color: var(--warn); }
+  #verdict.fail { border-left-color: var(--fail); }
+  #verdict strong { display: block; font-size: 17px; }
+  #browser { color: var(--muted); font-size: 13px; word-break: break-word; margin-top: 6px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+       margin: 22px 0 6px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card);
+          border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  td { padding: 7px 10px; border-top: 1px solid var(--line); vertical-align: top; }
+  tr:first-child td { border-top: 0; }
+  td.s { width: 64px; font-weight: 600; font-size: 13px; }
+  td.n { width: 38%; }
+  td.d { color: var(--muted); font-size: 13px; word-break: break-word; }
+  .pass { color: var(--pass); } .fail { color: var(--fail); }
+  .warn { color: var(--warn); } .info { color: var(--info); }
+  details { margin-top: 24px; color: var(--muted); font-size: 13px; }
+  pre { white-space: pre-wrap; word-break: break-all; background: var(--card);
+        border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+  button { font: inherit; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line);
+           background: var(--card); color: var(--fg); cursor: pointer; }
+</style>
+</head>
+<body>
+<main>
+  <h1>WebAssembly browser check</h1>
+  <p class="lead">Tests whether this browser supports the WebAssembly features that
+  large, multi-threaded numerical applications compiled to WebAssembly rely on.
+  Nothing leaves your browser.</p>
+  <div id="verdict"><strong>Running…</strong><div id="browser"></div></div>
+  <div id="groups"></div>
+  <details>
+    <summary>Raw result (JSON)</summary>
+    <p><button id="copy" type="button">Copy</button></p>
+    <pre id="raw"></pre>
+  </details>
+</main>
+<script>
+  // Opened from disk, the browser loads no module scripts, workers or
+  // WebAssembly files, and the page would never get past "Running…".
+  if (location.protocol === 'file:') {
+    document.querySelector('#verdict strong').textContent =
+      'This page must be served, not opened as a file: run "make serve" and open http://localhost:8000/.';
+    document.getElementById('verdict').className = 'fail';
+  }
+</script>
+<script src="coi.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

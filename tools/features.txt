@@ -1,0 +1,14 @@
+# The WebAssembly features the page tests, by the name of their probe
+# (src/probes/<name>.wat). tools/check-features.sh accepts a module only if it
+# needs nothing else: a module that needs more has outgrown this page, and the
+# page needs a probe and a check for the new feature first.
+simd128
+relaxed-simd
+threads
+bulk-memory
+exceptions-legacy
+sign-ext
+
+# The largest initial memory, in 64 KiB pages, the page allocates for each
+# worker (256 MiB). The maximum is always 4 GiB, the most wasm32 allows.
+memory-initial-pages 4096
