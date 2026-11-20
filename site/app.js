@@ -191,6 +191,7 @@ function runJob(b, module) {
 
 async function builds() {
   for (const b of BUILDS) {
+    await report(`test application, ${b.label}`);
     const g = group(`Test application, ${b.label}`);
     const r = result.builds[b.name] = { compiled: false, ran: false, gflops: null };
     let compiled;
@@ -223,8 +224,13 @@ function verdict() {
     result.relaxedSpeedup = rel.gflops / simd.gflops;
 }
 
-async function report() {
+// Sends the result so far. Until result.finished is set, it is partial: if
+// the page then dies (a tab that runs out of memory is ended without a
+// word), the last partial result still says how far it got. `stage` says
+// what it was doing.
+async function report(stage) {
   if (!REPORT) return;
+  result.stage = stage;
   try {
     await fetch(REPORT, { method: 'POST', headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify(result) });
@@ -240,6 +246,7 @@ async function main() {
     environment();
     probes();
     await builds();
+    await report('memory check');
     memory(); // last: what it allocates must not take memory from the jobs
     verdict();
   } catch (e) {

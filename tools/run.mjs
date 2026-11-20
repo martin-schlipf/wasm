@@ -5,17 +5,25 @@
 // (tools/playwright.mjs), or `xcrun simctl openurl` for an iOS simulator.
 //
 //   node tools/run.mjs --name <label> --out <file.json> [--root build/site]
-//        [--timeout 600] [--query workers=4] -- <command> [args with {url}]
+//        [--timeout 600] [--query workers=4] [--ignore-exit 1]
+//        -- <command> [args with {url}]
 //
-// Exits 0 when the page reported, whatever it found: a browser that cannot run
-// the application is a result, not an error. Exits 1 when no report came, and
-// then writes a result that says so.
+// The page reports partial results as it goes and a final one at the end. If
+// the final one does not come (a browser tab that runs out of memory dies
+// without a word), the result is the last partial one, marked as such.
+//
+// --ignore-exit 1: the command's exit status means nothing; wait for the page
+// anyway. For commands that only hand the URL over and may give up waiting
+// for the browser before it is ready (simctl openurl).
+//
+// Exits 0 when the page finished, whatever it found: a browser that cannot run
+// the application is a result, not an error. Exits 1 otherwise.
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { startServer } from './serve.mjs';
 
-const opt = { name: null, out: null, root: 'build/site', timeout: '600', query: '' };
+const opt = { name: null, out: null, root: 'build/site', timeout: '600', query: '', 'ignore-exit': '0' };
 const argv = process.argv.slice(2);
 const sep = argv.indexOf('--');
 if (sep < 0 || sep === argv.length - 1) {
@@ -28,10 +36,18 @@ for (let i = 0; i < sep; i += 2) {
   opt[k] = argv[i + 1];
 }
 if (!opt.name || !opt.out) { console.error('run.mjs: --name and --out are required'); process.exit(2); }
+const ignoreExit = opt['ignore-exit'] === '1';
 
-let finish;
-const reported = new Promise((resolve) => { finish = resolve; });
-const server = await startServer({ root: opt.root, onReport: finish });
+let finish, last = null;
+const finished = new Promise((resolve) => { finish = resolve; });
+const server = await startServer({
+  root: opt.root,
+  onReport: (r) => {
+    last = r;
+    if (r.finished) finish(r);
+    else console.log(`run: ${opt.name}: running: ${r.stage}`);
+  },
+});
 const query = ['report=/report', opt.query].filter(Boolean).join('&');
 const url = `http://127.0.0.1:${server.address().port}/?${query}`;
 const [cmd, ...args] = argv.slice(sep + 1).map((a) => a.replaceAll('{url}', url));
@@ -40,26 +56,32 @@ console.log(`run: ${opt.name}: ${cmd} ${args.join(' ')}`);
 const child = spawn(cmd, args, { stdio: ['ignore', 'inherit', 'inherit'] });
 let childError = null;
 child.on('error', (e) => { childError = e; });
-child.on('exit', (code, signal) => {
+child.on('exit', (code) => {
   // Some commands only hand the URL over and exit (simctl openurl, open -a);
-  // that is fine. A command that fails before the page reports is not.
-  if (code) childError = childError || new Error(`${cmd} exited with ${code}`);
+  // that is fine. One that fails before the page reports is not, unless told.
+  if (code && !ignoreExit) childError = childError || new Error(`${cmd} exited with ${code}`);
+  else if (code) console.log(`run: ${opt.name}: ${cmd} exited with ${code}; waiting for the page anyway`);
 });
 
 const timeout = new Promise((resolve) => setTimeout(() => resolve(null), Number(opt.timeout) * 1000));
 const failed = new Promise((resolve) => {
   const tick = setInterval(() => { if (childError) { clearInterval(tick); resolve(null); } }, 500);
 });
-let result = await Promise.race([reported, timeout, failed]);
+let result = await Promise.race([finished, timeout, failed]);
 
 if (child.exitCode === null) child.kill();
 server.close();
 mkdirSync(dirname(opt.out) || '.', { recursive: true });
 const ok = !!result;
 if (!result) {
-  const why = childError ? String(childError.message) : `no report within ${opt.timeout} s`;
+  const why = childError ? String(childError.message) : `no final result within ${opt.timeout} s`;
   console.error(`run: ${opt.name}: ${why}`);
-  result = { verdict: { status: 'error', text: `No result: ${why}` }, groups: [], builds: {} };
+  if (last) {
+    result = last;
+    result.verdict = { status: 'error', text: `The page stopped while running the ${last.stage} (${why}). The checks before that are below.` };
+  } else {
+    result = { verdict: { status: 'error', text: `No result: ${why}` }, groups: [], builds: {} };
+  }
 }
 result.name = opt.name;
 result.runner = process.env.RUNNER_OS ? `${process.env.RUNNER_OS} ${process.env.ImageOS || ''}`.trim() : null;

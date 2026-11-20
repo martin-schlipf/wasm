@@ -32,15 +32,14 @@ while read -r runtime version devtype; do
   udid=$(xcrun simctl create "check-$version" "$devtype" "$runtime")
   xcrun simctl boot "$udid"
   xcrun simctl bootstatus "$udid" -b > /dev/null
-  # Safari in a freshly booted simulator sometimes does not take the URL in
-  # time (simctl: "Operation timed out"); give it a few tries.
-  for try in 1 2 3; do
-    if node tools/run.mjs --name "Safari, iOS $version (simulator on $host)" \
-         --out "$out/ios-$version.json" --timeout 600 -- xcrun simctl openurl "$udid" '{url}'; then
-      break
-    fi
-    [ $try = 3 ] && status=1 || sleep 20
-  done
+  # Start Safari first: a freshly booted simulator is slow to start it, and
+  # openurl then gives up ("Operation timed out") although the page still
+  # opens. So its exit status is ignored, and only the page's report counts.
+  xcrun simctl launch "$udid" com.apple.mobilesafari > /dev/null || true
+  sleep 10
+  node tools/run.mjs --name "Safari, iOS $version (simulator on $host)" \
+    --out "$out/ios-$version.json" --timeout 300 --ignore-exit 1 \
+    -- xcrun simctl openurl "$udid" '{url}' || status=1
   xcrun simctl shutdown "$udid" || true
   xcrun simctl delete "$udid" || true
   echo "::endgroup::"
