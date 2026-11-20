@@ -109,18 +109,33 @@ function probes() {
 
 function memory() {
   const g = group('Memory');
-  // What a module declares: 256 MiB to start with, up to 4 GiB, shared. Some
-  // browsers reserve the maximum up front, which can fail on small devices.
-  const mems = [];
-  try {
-    for (let i = 0; i < WORKERS; i++)
-      mems.push(new WebAssembly.Memory({ initial: 4096, maximum: 65536, shared: true }));
-    add(g, `${WORKERS} × shared memory, 256 MiB, maximum 4 GiB`, 'pass');
-  } catch (e) {
-    add(g, `${WORKERS} × shared memory, 256 MiB, maximum 4 GiB`, 'fail',
-        `${mems.length} created, then ${errorText(e)}`);
+  // What a module declares: 256 MiB to start with, up to 4 GiB, shared, one
+  // per worker. Some browsers reserve the maximum up front, and refuse when
+  // the reservations do not fit. If this fails, find what does fit: the same
+  // memories with a smaller maximum, largest first (a failed attempt holds
+  // nothing, a successful one holds its memories until they are collected),
+  // and one that starts smaller.
+  const attempt = (initialMiB, maximumMiB) => {
+    const mems = [];
+    let error = null;
+    try {
+      for (let i = 0; i < WORKERS; i++)
+        mems.push(new WebAssembly.Memory({ initial: initialMiB * 16, maximum: maximumMiB * 16, shared: true }));
+    } catch (e) { error = e; }
+    return { created: mems.length, error };
+  };
+  const label = (init, max) => `${WORKERS} × shared memory, ${init} MiB, maximum ${max >= 1024 ? max / 1024 + ' GiB' : max + ' MiB'}`;
+  const detail = (r) => `${r.created} of ${WORKERS} created` + (r.error ? `, then ${errorText(r.error)}` : '');
+  const full = attempt(256, 4096);
+  add(g, label(256, 4096), full.error ? 'fail' : 'pass', full.error ? detail(full) : '');
+  if (!full.error) return;
+  const small = attempt(16, 4096);
+  add(g, label(16, 4096), 'info', detail(small));
+  for (const max of [2048, 1024, 512]) {
+    const r = attempt(256, max);
+    add(g, label(256, max), 'info', detail(r));
+    if (!r.error) break;
   }
-  mems.length = 0;
 }
 
 async function compileBuild(b) {

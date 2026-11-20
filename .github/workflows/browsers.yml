@@ -64,6 +64,8 @@ jobs:
             setup: |
               curl -sSfL https://archive.mozilla.org/pub/firefox/releases/120.0/linux-x86_64/en-US/firefox-120.0.tar.bz2 | tar -xj -C "$RUNNER_TEMP"
               echo "BROWSER=$RUNNER_TEMP/firefox/firefox" >> "$GITHUB_ENV"
+              # Its content processes crash in their sandbox on this Ubuntu.
+              echo "MOZ_DISABLE_CONTENT_SANDBOX=1" >> "$GITHUB_ENV"
             cmd: '"$BROWSER" --headless --no-remote --profile "$RUNNER_TEMP/profile" "{url}"'
           - name: WebKit, Playwright build (Linux)
             setup: |

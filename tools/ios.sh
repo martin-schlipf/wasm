@@ -25,14 +25,22 @@ node -e '
 rm runtimes.json
 if [ ! -s runtimes.txt ]; then echo "ios.sh: no iOS simulator runtime on this Mac" >&2; exit 1; fi
 
+host="macOS $(sw_vers -productVersion | cut -d. -f1)"
 status=0
 while read -r runtime version devtype; do
   echo "::group::iOS $version ($devtype)"
   udid=$(xcrun simctl create "check-$version" "$devtype" "$runtime")
   xcrun simctl boot "$udid"
   xcrun simctl bootstatus "$udid" -b > /dev/null
-  node tools/run.mjs --name "Safari, iOS $version (simulator)" --out "$out/ios-$version.json" \
-    --timeout 600 -- xcrun simctl openurl "$udid" '{url}' || status=1
+  # Safari in a freshly booted simulator sometimes does not take the URL in
+  # time (simctl: "Operation timed out"); give it a few tries.
+  for try in 1 2 3; do
+    if node tools/run.mjs --name "Safari, iOS $version (simulator on $host)" \
+         --out "$out/ios-$version.json" --timeout 600 -- xcrun simctl openurl "$udid" '{url}'; then
+      break
+    fi
+    [ $try = 3 ] && status=1 || sleep 20
+  done
   xcrun simctl shutdown "$udid" || true
   xcrun simctl delete "$udid" || true
   echo "::endgroup::"
