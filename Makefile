@@ -8,7 +8,8 @@
 #   make clean
 
 EMCC    ?= emcc
-NODE    ?= node
+# emsdk's own node: emsdk puts a folder named node on the PATH before any node.
+NODE    ?= $(or $(EMSDK_NODE),node)
 # emsdk puts emcc on the PATH but not binaryen's tools.
 WASM_AS ?= $(shell em-config BINARYEN_ROOT)/bin/wasm-as
 OUT     := build/site
